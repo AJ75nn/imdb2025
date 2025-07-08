@@ -2,7 +2,7 @@ import requests
 import re # Import regular expression module
 from bs4 import BeautifulSoup
 from django.core.management.base import BaseCommand
-from movies.models import Movie
+from movies.models import Movie, Genre # Import Genre model
 from datetime import datetime
 
 # Base URL for IMDb's list of 2025 movies.
@@ -14,6 +14,17 @@ class Command(BaseCommand):
     help = 'Scrapes IMDb for 2025 movies and stores them in the database'
 
     def handle(self, *args, **options):
+        # --- Temporary debug: Print existing poster URLs ---
+        self.stdout.write(self.style.SUCCESS("--- Checking existing poster URLs for some 2025 movies ---")) # Changed to SUCCESS for visibility
+        existing_movies = Movie.objects.filter(year=2025).order_by('title')[:5]
+        if not existing_movies:
+            self.stdout.write(self.style.SUCCESS("No existing 2025 movies found in DB to check poster URLs."))
+        else:
+            for movie_obj in existing_movies:
+                self.stdout.write(self.style.SUCCESS(f"  Movie: {movie_obj.title}, Stored Poster URL: {movie_obj.poster_url}"))
+        self.stdout.write(self.style.SUCCESS("--- End of existing poster URL check ---"))
+        # --- End Temporary debug ---
+
         self.stdout.write(self.style.SUCCESS('Starting IMDb scrape for 2025 movies...'))
 
         try:
@@ -114,52 +125,93 @@ class Command(BaseCommand):
                     skipped_count += 1
                     continue
 
-                # Poster URL from <img class="ipc-image">
-                poster_img_tag = item.select_one('img.ipc-image') # This img is inside div.ipc-poster
-                poster_url = None
+                # Refined Poster URL extraction
+                poster_img_tag = item.select_one('div.ipc-poster div.ipc-media img.ipc-image') # More specific selector
+                poster_url_str = None # Use a temporary variable for the raw extracted string
+                poster_url = None     # Final URL to be stored
+
+                poster_img_tag = item.select_one('img.ipc-image')
+
                 if poster_img_tag:
                     if poster_img_tag.has_attr('srcset'):
-                        # Take a higher resolution from srcset, e.g., 100w or a specific one
-                        srcset_parts = poster_img_tag['srcset'].split(',')
-                        # Find a reasonably sized image, e.g., > 75w
-                        for part in reversed(srcset_parts): # Prefer larger ones
-                            url_desc = part.strip().split(' ')
-                            if len(url_desc) == 2 and url_desc[1].endswith('w'):
-                                # width_val = int(url_desc[1][:-1])
-                                # if width_val >= 75: # Example threshold
-                                poster_url = url_desc[0]
-                                break
-                        if not poster_url: # Fallback to first in srcset if logic above fails
-                             poster_url = srcset_parts[0].split(' ')[0]
-                    elif poster_img_tag.has_attr('src'):
-                        poster_url = poster_img_tag['src']
+                        actual_srcset = poster_img_tag['srcset']
+                        srcset_matches = re.findall(r'(\S+?)\s+(\d+w)', actual_srcset)
 
-                if poster_url and '._V1_' in poster_url and not poster_url.endswith('_AL_.jpg'):
-                    # Ensure we get a good quality version if possible, but don't corrupt already good URLs
-                    base_poster_url = poster_url.split('._V1_')[0]
-                    poster_url = f"{base_poster_url}._V1_QL75_UX380_CR0,0,380,562_.jpg" # A common good quality variant
+                        if srcset_matches:
+                            best_url = None
+                            max_width = 0
+                            for url, width_descriptor in srcset_matches:
+                                try:
+                                    current_width = int(width_descriptor[:-1])
+                                    if current_width > max_width:
+                                        max_width = current_width
+                                        best_url = url
+                                except ValueError:
+                                    if not best_url: best_url = url # Fallback if width parse fails
+
+                            if best_url:
+                                poster_url_str = best_url
+                            elif srcset_matches: # Fallback if all width parsing failed
+                                poster_url_str = srcset_matches[0][0]
+                        # else:
+                        #     self.stdout.write(self.style.WARNING(f"    No regex matches in srcset for {title}: {actual_srcset}"))
+                    elif poster_img_tag.has_attr('src'):
+                        poster_url_str = poster_img_tag['src']
+                    # else:
+                    #    self.stdout.write(self.style.WARNING(f"    No src or srcset found for {title} on poster_img_tag"))
+                # else:
+                #    self.stdout.write(self.style.WARNING(f"    No poster_img_tag found for {title} using 'img.ipc-image'"))
+
+                # Validate and process the extracted URL
+                if poster_url_str and poster_url_str.startswith('http'):
+                    # It's a full URL, proceed with V1 processing if applicable
+                    if '._V1_' in poster_url_str and not poster_url_str.endswith('_AL_.jpg'):
+                        # Attempt to get a standard high-quality version
+                        base_poster_url = poster_url_str.split('._V1_')[0]
+                        poster_url = f"{base_poster_url}._V1_QL75_UX380_CR0,0,380,562_.jpg"
+                    else:
+                        # Already a full URL, might be fine as is (e.g. already _AL_.jpg or no _V1_ part)
+                        poster_url = poster_url_str
+                else:
+                    if poster_url_str: # It was extracted but isn't a full URL
+                        self.stdout.write(self.style.WARNING(f"Movie: {title} - Extracted poster_url '{poster_url_str}' is not a full URL. Storing None."))
+                    # poster_url remains None if not a valid absolute URL or not found
 
                 # Plot Summary - not in the provided snippet for the list item
                 plot_summary = "Plot summary not available on calendar page."
 
                 # TODO: Parse actual release date from the page if possible
-                # This would require finding the date under which this movie is listed.
-                # Example: find_previous_siblings('h2', class_='date-header') or similar.
                 # For now, release_date_obj remains None.
+
+                # Scrape Genres
+                movie_genres = []
+                genre_ul_tag = item.select_one('ul.ipc-metadata-list-summary-item__tl')
+                if genre_ul_tag:
+                    genre_span_tags = genre_ul_tag.select('span.ipc-metadata-list-summary-item__li')
+                    for span_tag in genre_span_tags:
+                        genre_name = span_tag.get_text(strip=True)
+                        if genre_name:
+                            genre, _ = Genre.objects.get_or_create(name=genre_name)
+                            movie_genres.append(genre)
+
+                defaults_dict = {
+                    'title': title,
+                    'year': year,
+                    'poster_url': poster_url,
+                    'plot_summary': plot_summary,
+                    'release_date': release_date_obj,
+                }
 
                 movie, created = Movie.objects.update_or_create(
                     imdb_id=imdb_id_raw,
-                    defaults={
-                        'title': title,
-                        'year': year,
-                        'poster_url': poster_url,
-                        'plot_summary': plot_summary,
-                        'release_date': release_date_obj, # Will be None for now
-                    }
+                    defaults=defaults_dict
                 )
 
+                if movie_genres:
+                    movie.genres.set(movie_genres) # Set the genres for the movie
+
                 if created:
-                    self.stdout.write(self.style.SUCCESS(f'Successfully scraped and saved: {movie.title}'))
+                    self.stdout.write(self.style.SUCCESS(f'Successfully scraped and saved: {movie.title} (Genres: {[g.name for g in movie_genres]})'))
                     scraped_count += 1
                 else:
                     self.stdout.write(self.style.NOTICE(f'Successfully updated: {movie.title}'))

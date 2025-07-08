@@ -10,10 +10,31 @@
 <body>
     <header>
         <h1>IMDb Scraped Movies - Year 2025</h1>
-        <p>Found {{ movie_count }} movie(s) for the year 2025.</p>
+        {% if selected_genre %}
+            <p>Showing {{ movie_count }} movie(s) for genre "<strong>{{ selected_genre }}</strong>" in 2025.</p>
+        {% else %}
+            <p>Found {{ movie_count }} movie(s) for the year 2025.</p>
+        {% endif %}
     </header>
 
     <main>
+        <div class="filter-section">
+            <form method="GET" action="{% url 'movies:movie_list' %}">
+                <label for="genre-select">Filter by Genre:</label>
+                <select name="genre" id="genre-select" onchange="this.form.submit()">
+                    <option value="">All Genres</option>
+                    {% for genre in available_genres %}
+                        <option value="{{ genre.name }}" {% if genre.name == selected_genre %}selected{% endif %}>
+                            {{ genre.name }} ({{ genre.num_movies }})
+                        </option>
+                    {% endfor %}
+                </select>
+                {% if selected_genre %}
+                    <a href="{% url 'movies:movie_list' %}" class="clear-filter-btn">Clear Filter</a>
+                {% endif %}
+            </form>
+        </div>
+
         {% if movies %}
             <div class="movie-grid">
                 {% for movie in movies %}
@@ -22,17 +43,25 @@
                             <img src="{{ movie.poster_url }}" alt="{{ movie.title }} Poster" class="movie-poster">
                         {% else %}
                             <div class="movie-poster-placeholder">
-                                <span>No Poster Available</span>
+                                <span>No Poster</span>
                             </div>
                         {% endif %}
                         <div class="movie-info">
                             <h2>{{ movie.title }}</h2>
                             <p class="movie-year">({{ movie.year }})</p>
                             <p class="movie-imdb-id">IMDb ID: {{ movie.imdb_id }}</p>
+                            {% if movie.genres.all %}
+                                <p class="movie-genres">
+                                    Genres:
+                                    {% for genre in movie.genres.all %}
+                                        <a href="{% url 'movies:movie_list' %}?genre={{ genre.name|urlencode }}">{{ genre.name }}</a>{% if not forloop.last %}, {% endif %}
+                                    {% endfor %}
+                                </p>
+                            {% endif %}
                             {% if movie.release_date %}
                                 <p class="movie-release-date">Release Date: {{ movie.release_date|date:"M d, Y" }}</p>
                             {% endif %}
-                            <p class="movie-plot">{{ movie.plot_summary|default:"Plot summary not available."|truncatewords:40 }}</p>
+                            <p class="movie-plot">{{ movie.plot_summary|default:"Plot summary not available."|truncatewords:30 }}</p>
                         </div>
                     </div>
                 {% endfor %}

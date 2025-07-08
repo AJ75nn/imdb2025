@@ -124,6 +124,58 @@ main {
     border-radius: 5px;
 }
 
+.filter-section {
+    background-color: #fff;
+    padding: 15px 20px;
+    margin-bottom: 25px;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+.filter-section label {
+    font-weight: bold;
+    margin-right: 10px;
+}
+
+.filter-section select {
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    min-width: 200px;
+    font-size: 1em;
+}
+
+.clear-filter-btn {
+    margin-left: 15px;
+    padding: 8px 15px;
+    background-color: #e0e0e0;
+    color: #333;
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 0.9em;
+    transition: background-color 0.2s ease;
+}
+
+.clear-filter-btn:hover {
+    background-color: #bdbdbd;
+}
+
+
+.movie-genres {
+    font-size: 0.85em;
+    color: #555;
+    margin-bottom: 10px;
+}
+.movie-genres a {
+    color: #1a237e; /* Dark blue, same as header */
+    text-decoration: none;
+}
+.movie-genres a:hover {
+    text-decoration: underline;
+}
+
+
 .no-movies-message pre {
     background-color: #f0f0f0;
     padding: 10px;
